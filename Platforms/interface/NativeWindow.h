@@ -57,9 +57,33 @@
 #    error Unknown platform. Please define one of the following macros as 1: PLATFORM_WIN32, PLATFORM_UNIVERSAL_WINDOWS, PLATFORM_ANDROID, PLATFORM_LINUX, PLATFORM_MACOS, PLATFORM_IOS.
 #endif
 
+// OWN CHANGES
+struct GLFWwindow;
+// OWN CHANGES
+
 DILIGENT_BEGIN_NAMESPACE(Diligent)
 
-#if PLATFORM_WIN32
+// OWN CHANGES
+#if USE_GLFW_NATIVE_WINDOW
+
+struct GLFWnativeWindow
+{
+    GLFWwindow* m_Window DEFAULT_INITIALIZER(nullptr);
+
+#    if DILIGENT_CPP_INTERFACE
+    GLFWnativeWindow() noexcept
+    {}
+
+    explicit GLFWnativeWindow(GLFWwindow* t_window) noexcept :
+        m_Window(t_window)
+    {}
+#    endif
+};
+
+typedef struct GLFWnativeWindow NativeWindow;
+// OWN CHANGES
+
+#elif PLATFORM_WIN32
 
 typedef struct Win32NativeWindow NativeWindow;
 

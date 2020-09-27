@@ -135,6 +135,12 @@ add_custom_command(OUTPUT ${GENERATE_MIPS_SHADER_INC} # We must use full path he
                    VERBATIM
 )
 
+# OWN CHANGES
+include(conan.cmake)
+conan_cmake_run(CONANFILE conanfile.txt
+                BASIC_SETUP NO_OUTPUT_DIRS)
+# END OWN CHANGES
+
 
 add_library(Diligent-GraphicsEngineVkInterface INTERFACE)
 target_include_directories(Diligent-GraphicsEngineVkInterface
@@ -144,6 +150,9 @@ INTERFACE
 target_link_libraries(Diligent-GraphicsEngineVkInterface 
 INTERFACE 
     Diligent-GraphicsEngineInterface
+
+    ## OWN CHANGES ##
+    ${CONAN_LIBS}
 )
 
 add_library(Diligent-GraphicsEngineVk-static STATIC 
@@ -262,6 +271,8 @@ PRIVATE
     ${PRIVATE_DEPENDENCIES}
 PUBLIC
     ${PUBLIC_DEPENDENCIES}
+    ## OWN CHANGES ##
+    ${CONAN_LIBS}
 )
 target_link_libraries(Diligent-GraphicsEngineVk-shared
 PRIVATE
@@ -269,6 +280,8 @@ PRIVATE
     ${WHOLE_ARCHIVE_FLAG} Diligent-GraphicsEngineVk-static ${NO_WHOLE_ARCHIVE_FLAG}
 PUBLIC
     ${PUBLIC_DEPENDENCIES}
+    ## OWN CHANGES ##
+    ${CONAN_LIBS}
 )
 
 if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
@@ -302,7 +315,11 @@ elseif (CMAKE_CXX_COMPILER_ID MATCHES "GNU")
     endif()
 endif()
 
-if(PLATFORM_WIN32)
+## OWN CHANGES ##
+option(GLFW_ENABLED "Wheter to use GLFW to create the window surface (Vulkan-specific)" OFF)
+if(GLFW_ENABLED)
+    set(PRIVATE_COMPILE_DEFINITIONS VK_USE_GLFW_KHR=1)
+elseif(PLATFORM_WIN32)
     set(PRIVATE_COMPILE_DEFINITIONS VK_USE_PLATFORM_WIN32_KHR=1 NOMINMAX DILIGENT_USE_VOLK=1)
 elseif(PLATFORM_LINUX)
     set(PRIVATE_COMPILE_DEFINITIONS VK_USE_PLATFORM_XCB_KHR=1 VK_USE_PLATFORM_XLIB_KHR=1  DILIGENT_USE_VOLK=1)

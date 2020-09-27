@@ -15,6 +15,13 @@ set(PLATFORM_INTERFACE_HEADERS
 
 add_subdirectory(Basic)
 
+## OWN CHANGES ##
+option(GLFW_ENABLED "Wheter to use GLFW to create the window surface (Vulkan-specific)" OFF)
+if(GLFW_ENABLED)
+	target_compile_definitions(Diligent-PlatformInterface INTERFACE USE_GLFW_NATIVE_WINDOW=1)
+endif()
+## OWN CHANGES ##
+
 if(PLATFORM_WIN32)
 	add_subdirectory(Win32)
 	add_library(Diligent-TargetPlatform ALIAS Diligent-Win32Platform)

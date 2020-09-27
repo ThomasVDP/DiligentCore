@@ -33,6 +33,15 @@
 #include "TextureVkImpl.hpp"
 #include "EngineMemory.h"
 
+// OWN CHANGES //
+#ifndef VK_VERSION_1_0
+#    define VK_VERSION_1_0
+#endif
+#if defined(VK_USE_GLFW_KHR)
+#    include <GLFW/glfw3.h>
+#endif
+// OWN CHANGES //
+
 namespace Diligent
 {
 
@@ -69,7 +78,10 @@ void SwapChainVkImpl::CreateSurface()
 
     // Create OS-specific surface
     VkResult err = VK_ERROR_INITIALIZATION_FAILED;
-#if defined(VK_USE_PLATFORM_WIN32_KHR)
+#if defined(VK_USE_GLFW_KHR)
+
+    err = glfwCreateWindowSurface(m_VulkanInstance->GetVkInstance(), m_Window.m_Window, nullptr, &m_VkSurface);
+#elif defined(VK_USE_PLATFORM_WIN32_KHR)
     if (m_Window.hWnd != NULL)
     {
         VkWin32SurfaceCreateInfoKHR surfaceCreateInfo = {};
