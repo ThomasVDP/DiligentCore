@@ -68,13 +68,13 @@ DILIGENT_BEGIN_NAMESPACE(Diligent)
 
 struct GLFWnativeWindow
 {
-    GLFWwindow* m_Window DEFAULT_INITIALIZER(nullptr);
+    struct GLFWwindow* m_Window DEFAULT_INITIALIZER(nullptr);
 
 #    if DILIGENT_CPP_INTERFACE
     GLFWnativeWindow() noexcept
     {}
 
-    explicit GLFWnativeWindow(GLFWwindow* t_window) noexcept :
+    explicit GLFWnativeWindow(struct GLFWwindow* t_window) noexcept :
         m_Window(t_window)
     {}
 #    endif
