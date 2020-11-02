@@ -78,10 +78,11 @@ struct SPIRVShaderResourceAttribs
 
     static constexpr const Uint32   InvalidSepSmplrOrImgInd = static_cast<Uint32>(-1);
 
-/*  0 */const char* const           Name;
-/*  8 */const Uint16                ArraySize;
-/* 10 */const ResourceType          Type;
-/* 11 */ // unused
+/*  0  */const char* const           Name;
+/*  8  */const Uint16                ArraySize;
+/* 10  */const ResourceType          Type;
+/* 11.0*/const Uint8                 ResourceDim   : 7;
+/* 11.7*/const Uint8                 IsMS          : 1;
 private:
       // Defines the mapping between separate samplers and seperate images when HLSL-style
       // combined texture samplers are in use (i.e. texture2D g_Tex + sampler g_Tex_sampler).
@@ -159,6 +160,16 @@ public:
     }
 
     ShaderResourceDesc GetResourceDesc() const;
+
+    RESOURCE_DIMENSION GetResourceDimension() const
+    {
+        return static_cast<RESOURCE_DIMENSION>(ResourceDim);
+    }
+
+    bool IsMultisample() const
+    {
+        return IsMS != 0;
+    }
 };
 static_assert(sizeof(SPIRVShaderResourceAttribs) % sizeof(void*) == 0, "Size of SPIRVShaderResourceAttribs struct must be multiple of sizeof(void*)");
 
@@ -348,7 +359,8 @@ private:
     void Initialize(IMemoryAllocator&       Allocator,
                     const ResourceCounters& Counters,
                     Uint32                  NumShaderStageInputs,
-                    size_t                  ResourceNamesPoolSize);
+                    size_t                  ResourceNamesPoolSize,
+                    StringPool&             ResourceNamesPool);
 
     SPIRVShaderResourceAttribs& GetResAttribs(Uint32 n, Uint32 NumResources, Uint32 Offset) noexcept
     {
@@ -386,8 +398,6 @@ private:
     // Memory buffer that holds all resources as continuous chunk of memory:
     // |  UBs  |  SBs  |  StrgImgs  |  SmplImgs  |  ACs  |  SepSamplers  |  SepImgs  | Stage Inputs | Resource Names |
     std::unique_ptr<void, STDDeleterRawMem<void>> m_MemoryBuffer;
-
-    StringPool m_ResourceNames;
 
     const char* m_CombinedSamplerSuffix = nullptr;
     const char* m_ShaderName            = nullptr;

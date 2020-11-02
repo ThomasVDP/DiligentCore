@@ -96,8 +96,8 @@ BufferGLImpl::BufferGLImpl(IReferenceCounters*        pRefCounters,
         LOG_ERROR_AND_THROW("Unified resources are not supported in OpenGL/GLES");
     }
 
-    if (m_Desc.Usage == USAGE_STATIC)
-        VERIFY(pBuffData != nullptr && pBuffData->pData != nullptr, "Initial data must not be null for static buffers");
+    if (m_Desc.Usage == USAGE_IMMUTABLE)
+        VERIFY(pBuffData != nullptr && pBuffData->pData != nullptr, "Initial data must not be null for immutable buffers");
 
     // TODO: find out if it affects performance if the buffer is originally bound to one target
     // and then bound to another (such as first to GL_ARRAY_BUFFER and then to GL_UNIFORM_BUFFER)
@@ -385,7 +385,7 @@ void BufferGLImpl::CreateViewInternal(const BufferViewDesc& OrigViewDesc, IBuffe
         auto ViewDesc = OrigViewDesc;
         CorrectBufferViewDesc(ViewDesc);
 
-        auto* pDeviceGLImpl     = ValidatedCast<RenderDeviceGLImpl>(GetDevice());
+        auto* pDeviceGLImpl     = GetDevice();
         auto& BuffViewAllocator = pDeviceGLImpl->GetBuffViewObjAllocator();
         VERIFY(&BuffViewAllocator == &m_dbgBuffViewAllocator, "Buff view allocator does not match allocator provided at buffer initialization");
 
@@ -400,7 +400,7 @@ void BufferGLImpl::CreateViewInternal(const BufferViewDesc& OrigViewDesc, IBuffe
     catch (const std::runtime_error&)
     {
         const auto* ViewTypeName = GetBufferViewTypeLiteralName(OrigViewDesc.ViewType);
-        LOG_ERROR("Failed to create view \"", OrigViewDesc.Name ? OrigViewDesc.Name : "", "\" (", ViewTypeName, ") for buffer \"", m_Desc.Name ? m_Desc.Name : "", "\"");
+        LOG_ERROR("Failed to create view '", (OrigViewDesc.Name ? OrigViewDesc.Name : ""), "' (", ViewTypeName, ") for buffer '", (m_Desc.Name ? m_Desc.Name : ""), "'");
     }
 }
 

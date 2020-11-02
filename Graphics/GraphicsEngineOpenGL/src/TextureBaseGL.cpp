@@ -40,38 +40,6 @@
 namespace Diligent
 {
 
-
-Uint32 TextureBaseGL::GetPBODataOffset(const TextureDesc& TexDesc, Uint32 ArraySlice, Uint32 MipLevel)
-{
-    VERIFY_EXPR(ArraySlice < TexDesc.ArraySize && MipLevel < TexDesc.MipLevels || ArraySlice == TexDesc.ArraySize && MipLevel == 0);
-
-    Uint32 Offset = 0;
-    if (ArraySlice > 0)
-    {
-        Uint32 ArraySliceSize = 0;
-        for (Uint32 mip = 0; mip < TexDesc.MipLevels; ++mip)
-        {
-            auto MipInfo = GetMipLevelProperties(TexDesc, mip);
-            ArraySliceSize += Align(MipInfo.MipSize, Uint32{4});
-        }
-
-        Offset = ArraySliceSize;
-        if (TexDesc.Type == RESOURCE_DIM_TEX_1D_ARRAY ||
-            TexDesc.Type == RESOURCE_DIM_TEX_2D_ARRAY ||
-            TexDesc.Type == RESOURCE_DIM_TEX_CUBE ||
-            TexDesc.Type == RESOURCE_DIM_TEX_CUBE_ARRAY)
-            Offset *= ArraySlice;
-    }
-
-    for (Uint32 mip = 0; mip < MipLevel; ++mip)
-    {
-        auto MipInfo = GetMipLevelProperties(TexDesc, mip);
-        Offset += Align(MipInfo.MipSize, Uint32{4});
-    }
-
-    return Offset;
-}
-
 TextureBaseGL::TextureBaseGL(IReferenceCounters*        pRefCounters,
                              FixedBlockMemoryAllocator& TexViewObjAllocator,
                              RenderDeviceGLImpl*        pDeviceGL,
@@ -95,8 +63,8 @@ TextureBaseGL::TextureBaseGL(IReferenceCounters*        pRefCounters,
 // clang-format on
 {
     VERIFY(m_GLTexFormat != 0, "Unsupported texture format");
-    if (TexDesc.Usage == USAGE_STATIC && pInitData == nullptr)
-        LOG_ERROR_AND_THROW("Static Texture must be initialized with data at creation time");
+    if (TexDesc.Usage == USAGE_IMMUTABLE && pInitData == nullptr)
+        LOG_ERROR_AND_THROW("Immutable textures must be initialized with data at creation time");
 
     if (TexDesc.Usage == USAGE_STAGING)
     {
@@ -106,7 +74,7 @@ TextureBaseGL::TextureBaseGL(IReferenceCounters*        pRefCounters,
         StagingBuffName += '\'';
         StagingBufferDesc.Name = StagingBuffName.c_str();
 
-        StagingBufferDesc.uiSizeInBytes  = GetPBODataOffset(m_Desc, m_Desc.ArraySize, 0);
+        StagingBufferDesc.uiSizeInBytes  = GetStagingTextureSubresourceOffset(m_Desc, m_Desc.ArraySize, 0, PBOOffsetAlignment);
         StagingBufferDesc.Usage          = USAGE_STAGING;
         StagingBufferDesc.CPUAccessFlags = TexDesc.CPUAccessFlags;
 
@@ -393,7 +361,7 @@ void TextureBaseGL::CreateViewInternal(const struct TextureViewDesc& OrigViewDes
         auto ViewDesc = OrigViewDesc;
         CorrectTextureViewDesc(ViewDesc);
 
-        auto* pDeviceGLImpl    = ValidatedCast<RenderDeviceGLImpl>(GetDevice());
+        auto* pDeviceGLImpl    = GetDevice();
         auto& TexViewAllocator = pDeviceGLImpl->GetTexViewObjAllocator();
         VERIFY(&TexViewAllocator == &m_dbgTexViewObjAllocator, "Texture view allocator does not match allocator provided during texture initialization");
 
@@ -522,7 +490,7 @@ void TextureBaseGL::CreateViewInternal(const struct TextureViewDesc& OrigViewDes
     catch (const std::runtime_error&)
     {
         const auto* ViewTypeName = GetTexViewTypeLiteralName(OrigViewDesc.ViewType);
-        LOG_ERROR("Failed to create view \"", OrigViewDesc.Name ? OrigViewDesc.Name : "", "\" (", ViewTypeName, ") for texture \"", m_Desc.Name ? m_Desc.Name : "", "\"");
+        LOG_ERROR("Failed to create view '", (OrigViewDesc.Name ? OrigViewDesc.Name : ""), "' (", ViewTypeName, ") for texture '", (m_Desc.Name ? m_Desc.Name : ""), "'");
     }
 }
 

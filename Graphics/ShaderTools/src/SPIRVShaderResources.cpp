@@ -53,6 +53,46 @@ Type GetResourceArraySize(const diligent_spirv_cross::Compiler& Compiler,
     return static_cast<Type>(arrSize);
 }
 
+static RESOURCE_DIMENSION GetResourceDimension(const diligent_spirv_cross::Compiler& Compiler,
+                                               const diligent_spirv_cross::Resource& Res)
+{
+    const auto& type = Compiler.get_type(Res.type_id);
+    if (type.basetype == diligent_spirv_cross::SPIRType::BaseType::Image ||
+        type.basetype == diligent_spirv_cross::SPIRType::BaseType::SampledImage)
+    {
+        switch (type.image.dim)
+        {
+            // clang-format off
+            case spv::Dim1D:     return type.image.arrayed ? RESOURCE_DIM_TEX_1D_ARRAY : RESOURCE_DIM_TEX_1D;
+            case spv::Dim2D:     return type.image.arrayed ? RESOURCE_DIM_TEX_2D_ARRAY : RESOURCE_DIM_TEX_2D;
+            case spv::Dim3D:     return RESOURCE_DIM_TEX_3D;
+            case spv::DimCube:   return type.image.arrayed ? RESOURCE_DIM_TEX_CUBE_ARRAY : RESOURCE_DIM_TEX_CUBE;
+            case spv::DimBuffer: return RESOURCE_DIM_BUFFER;
+            // clang-format on
+            default: return RESOURCE_DIM_UNDEFINED;
+        }
+    }
+    else
+    {
+        return RESOURCE_DIM_UNDEFINED;
+    }
+}
+
+static bool IsMultisample(const diligent_spirv_cross::Compiler& Compiler,
+                          const diligent_spirv_cross::Resource& Res)
+{
+    const auto& type = Compiler.get_type(Res.type_id);
+    if (type.basetype == diligent_spirv_cross::SPIRType::BaseType::Image ||
+        type.basetype == diligent_spirv_cross::SPIRType::BaseType::SampledImage)
+    {
+        return type.image.ms;
+    }
+    else
+    {
+        return RESOURCE_DIM_UNDEFINED;
+    }
+}
+
 static uint32_t GetDecorationOffset(const diligent_spirv_cross::Compiler& Compiler,
                                     const diligent_spirv_cross::Resource& Res,
                                     spv::Decoration                       Decoration)
@@ -74,6 +114,8 @@ SPIRVShaderResourceAttribs::SPIRVShaderResourceAttribs(const diligent_spirv_cros
     Name                          {_Name},
     ArraySize                     {GetResourceArraySize<decltype(ArraySize)>(Compiler, Res)},
     Type                          {_Type},
+    ResourceDim                   {Diligent::GetResourceDimension(Compiler, Res)},
+    IsMS                          {Diligent::IsMultisample(Compiler, Res) ? Uint8{1} : Uint8{0}},
     SepSmplrOrImgInd              {_SepSmplrOrImgInd},
     BindingDecorationOffset       {GetDecorationOffset(Compiler, Res, spv::Decoration::DecorationBinding)},
     DescriptorSetDecorationOffset {GetDecorationOffset(Compiler, Res, spv::Decoration::DecorationDescriptorSet)}
@@ -332,7 +374,10 @@ SPIRVShaderResources::SPIRVShaderResources(IMemoryAllocator&     Allocator,
     ResCounters.NumSepImgs   = static_cast<Uint32>(resources.separate_images.size());
     ResCounters.NumInptAtts  = static_cast<Uint32>(resources.subpass_inputs.size());
     static_assert(SPIRVShaderResourceAttribs::ResourceType::NumResourceTypes == 11, "Please set the new resource type counter here");
-    Initialize(Allocator, ResCounters, NumShaderStageInputs, ResourceNamesPoolSize);
+
+    // Resource names pool is only needed to facilitate string allocation.
+    StringPool ResourceNamesPool;
+    Initialize(Allocator, ResCounters, NumShaderStageInputs, ResourceNamesPoolSize, ResourceNamesPool);
 
     {
         Uint32 CurrUB = 0;
@@ -342,7 +387,7 @@ SPIRVShaderResources::SPIRVShaderResources(IMemoryAllocator&     Allocator,
             new (&GetUB(CurrUB++))
                 SPIRVShaderResourceAttribs(Compiler,
                                            UB,
-                                           m_ResourceNames.CopyString(name),
+                                           ResourceNamesPool.CopyString(name),
                                            SPIRVShaderResourceAttribs::ResourceType::UniformBuffer);
         }
         VERIFY_EXPR(CurrUB == GetNumUBs());
@@ -360,7 +405,7 @@ SPIRVShaderResources::SPIRVShaderResources(IMemoryAllocator&     Allocator,
             new (&GetSB(CurrSB++))
                 SPIRVShaderResourceAttribs(Compiler,
                                            SB,
-                                           m_ResourceNames.CopyString(SB.name),
+                                           ResourceNamesPool.CopyString(SB.name),
                                            ResType);
         }
         VERIFY_EXPR(CurrSB == GetNumSBs());
@@ -377,7 +422,7 @@ SPIRVShaderResources::SPIRVShaderResources(IMemoryAllocator&     Allocator,
             new (&GetSmpldImg(CurrSmplImg++))
                 SPIRVShaderResourceAttribs(Compiler,
                                            SmplImg,
-                                           m_ResourceNames.CopyString(SmplImg.name),
+                                           ResourceNamesPool.CopyString(SmplImg.name),
                                            ResType);
         }
         VERIFY_EXPR(CurrSmplImg == GetNumSmpldImgs());
@@ -394,7 +439,7 @@ SPIRVShaderResources::SPIRVShaderResources(IMemoryAllocator&     Allocator,
             new (&GetImg(CurrImg++))
                 SPIRVShaderResourceAttribs(Compiler,
                                            Img,
-                                           m_ResourceNames.CopyString(Img.name),
+                                           ResourceNamesPool.CopyString(Img.name),
                                            ResType);
         }
         VERIFY_EXPR(CurrImg == GetNumImgs());
@@ -407,7 +452,7 @@ SPIRVShaderResources::SPIRVShaderResources(IMemoryAllocator&     Allocator,
             new (&GetAC(CurrAC++))
                 SPIRVShaderResourceAttribs(Compiler,
                                            AC,
-                                           m_ResourceNames.CopyString(AC.name),
+                                           ResourceNamesPool.CopyString(AC.name),
                                            SPIRVShaderResourceAttribs::ResourceType::AtomicCounter);
         }
         VERIFY_EXPR(CurrAC == GetNumACs());
@@ -420,7 +465,7 @@ SPIRVShaderResources::SPIRVShaderResources(IMemoryAllocator&     Allocator,
             new (&GetSepSmplr(CurrSepSmpl++))
                 SPIRVShaderResourceAttribs(Compiler,
                                            SepSam,
-                                           m_ResourceNames.CopyString(SepSam.name),
+                                           ResourceNamesPool.CopyString(SepSam.name),
                                            SPIRVShaderResourceAttribs::ResourceType::SeparateSampler);
         }
         VERIFY_EXPR(CurrSepSmpl == GetNumSepSmplrs());
@@ -462,7 +507,7 @@ SPIRVShaderResources::SPIRVShaderResources(IMemoryAllocator&     Allocator,
             auto* pNewSepImg = new (&GetSepImg(CurrSepImg++))
                 SPIRVShaderResourceAttribs(Compiler,
                                            SepImg,
-                                           m_ResourceNames.CopyString(SepImg.name),
+                                           ResourceNamesPool.CopyString(SepImg.name),
                                            ResType,
                                            SamplerInd);
             if (ResType == SPIRVShaderResourceAttribs::ResourceType::SeparateImage && pNewSepImg->IsValidSepSamplerAssigned())
@@ -486,7 +531,7 @@ SPIRVShaderResources::SPIRVShaderResources(IMemoryAllocator&     Allocator,
             new (&GetInptAtt(CurrSubpassInput++))
                 SPIRVShaderResourceAttribs(Compiler,
                                            SubpassInput,
-                                           m_ResourceNames.CopyString(SubpassInput.name),
+                                           ResourceNamesPool.CopyString(SubpassInput.name),
                                            SPIRVShaderResourceAttribs::ResourceType::InputAttachment);
         }
         VERIFY_EXPR(CurrSubpassInput == GetNumInptAtts());
@@ -496,10 +541,10 @@ SPIRVShaderResources::SPIRVShaderResources(IMemoryAllocator&     Allocator,
 
     if (CombinedSamplerSuffix != nullptr)
     {
-        m_CombinedSamplerSuffix = m_ResourceNames.CopyString(CombinedSamplerSuffix);
+        m_CombinedSamplerSuffix = ResourceNamesPool.CopyString(CombinedSamplerSuffix);
     }
 
-    m_ShaderName = m_ResourceNames.CopyString(shaderDesc.Name);
+    m_ShaderName = ResourceNamesPool.CopyString(shaderDesc.Name);
 
     if (LoadShaderStageInputs)
     {
@@ -510,13 +555,13 @@ SPIRVShaderResources::SPIRVShaderResources(IMemoryAllocator&     Allocator,
             {
                 const auto& Semantic = Compiler.get_decoration_string(Input.id, spv::Decoration::DecorationHlslSemanticGOOGLE);
                 new (&GetShaderStageInputAttribs(CurrStageInput++))
-                    SPIRVShaderStageInputAttribs(m_ResourceNames.CopyString(Semantic), GetDecorationOffset(Compiler, Input, spv::Decoration::DecorationLocation));
+                    SPIRVShaderStageInputAttribs(ResourceNamesPool.CopyString(Semantic), GetDecorationOffset(Compiler, Input, spv::Decoration::DecorationLocation));
             }
         }
         VERIFY_EXPR(CurrStageInput == GetNumShaderStageInputs());
     }
 
-    VERIFY(m_ResourceNames.GetRemainingSize() == 0, "Names pool must be empty");
+    VERIFY(ResourceNamesPool.GetRemainingSize() == 0, "Names pool must be empty");
 
     //LOG_INFO_MESSAGE(DumpResources());
 
@@ -536,7 +581,8 @@ SPIRVShaderResources::SPIRVShaderResources(IMemoryAllocator&     Allocator,
 void SPIRVShaderResources::Initialize(IMemoryAllocator&       Allocator,
                                       const ResourceCounters& Counters,
                                       Uint32                  NumShaderStageInputs,
-                                      size_t                  ResourceNamesPoolSize)
+                                      size_t                  ResourceNamesPoolSize,
+                                      StringPool&             ResourceNamesPool)
 {
     Uint32           CurrentOffset = 0;
     constexpr Uint32 MaxOffset     = std::numeric_limits<OffsetType>::max();
@@ -578,6 +624,7 @@ void SPIRVShaderResources::Initialize(IMemoryAllocator&       Allocator,
     VERIFY_EXPR(GetNumACs()       == Counters.NumACs);
     VERIFY_EXPR(GetNumSepSmplrs() == Counters.NumSepSmplrs);
     VERIFY_EXPR(GetNumSepImgs()   == Counters.NumSepImgs);
+    VERIFY_EXPR(GetNumInptAtts()  == Counters.NumInptAtts);
     // clang-format on
 
     if (MemorySize)
@@ -587,7 +634,7 @@ void SPIRVShaderResources::Initialize(IMemoryAllocator&       Allocator,
         char* NamesPool = reinterpret_cast<char*>(m_MemoryBuffer.get()) +
             m_TotalResources * sizeof(SPIRVShaderResourceAttribs) +
             m_NumShaderStageInputs * sizeof(SPIRVShaderStageInputAttribs);
-        m_ResourceNames.AssignMemory(NamesPool, ResourceNamesPoolSize);
+        ResourceNamesPool.AssignMemory(NamesPool, ResourceNamesPoolSize);
     }
 }
 
@@ -613,6 +660,9 @@ SPIRVShaderResources::~SPIRVShaderResources()
 
     for (Uint32 n = 0; n < GetNumSepImgs(); ++n)
         GetSepImg(n).~SPIRVShaderResourceAttribs();
+
+    for (Uint32 n = 0; n < GetNumInptAtts(); ++n)
+        GetInptAtt(n).~SPIRVShaderResourceAttribs();
 
     for (Uint32 n = 0; n < GetNumShaderStageInputs(); ++n)
         GetShaderStageInputAttribs(n).~SPIRVShaderStageInputAttribs();
@@ -744,7 +794,8 @@ bool SPIRVShaderResources::IsCompatibleWith(const SPIRVShaderResources& Resource
         GetNumSmpldImgs()         != Resources.GetNumSmpldImgs()  ||
         GetNumACs()               != Resources.GetNumACs()        ||
         GetNumSepImgs()           != Resources.GetNumSepImgs()    ||
-        GetNumSepSmplrs()         != Resources.GetNumSepSmplrs())
+        GetNumSepSmplrs()         != Resources.GetNumSepSmplrs()  ||
+        GetNumInptAtts()          != Resources.GetNumInptAtts())
         return false;
     // clang-format on
     VERIFY_EXPR(GetTotalResources() == Resources.GetTotalResources());

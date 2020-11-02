@@ -85,12 +85,12 @@ void DeviceContextGLImpl::SetPipelineState(IPipelineState* pPipelineState)
     TDeviceContextBase::SetPipelineState(pPipelineStateGLImpl, 0 /*Dummy*/);
 
     const auto& Desc = pPipelineStateGLImpl->GetDesc();
-    if (Desc.IsComputePipeline())
+    if (Desc.PipelineType == PIPELINE_TYPE_COMPUTE)
     {
     }
     else if (Desc.PipelineType == PIPELINE_TYPE_GRAPHICS)
     {
-        const auto& GraphicsPipeline = Desc.GraphicsPipeline;
+        const auto& GraphicsPipeline = pPipelineStateGLImpl->GetGraphicsPipelineDesc();
         // Set rasterizer state
         {
             const auto& RasterizerDesc = GraphicsPipeline.RasterizerDesc;
@@ -896,7 +896,7 @@ void DeviceContextGLImpl::PrepareForDraw(DRAW_FLAGS Flags, bool IsIndexed, GLenu
     m_pPipelineState->CommitProgram(m_ContextState);
 
     auto        CurrNativeGLContext = m_pDevice->m_GLContext.GetCurrentNativeGLContext();
-    const auto& PipelineDesc        = m_pPipelineState->GetDesc().GraphicsPipeline;
+    const auto& PipelineDesc        = m_pPipelineState->GetGraphicsPipelineDesc();
     if (!m_ContextState.IsValidVAOBound())
     {
         auto&    VAOCache     = m_pDevice->GetVAOCache(CurrNativeGLContext);
@@ -1500,19 +1500,14 @@ void DeviceContextGLImpl::CopyTexture(const CopyTextureAttribs& CopyAttribs)
     if (SrcTexDesc.Usage == USAGE_STAGING && DstTexDesc.Usage != USAGE_STAGING)
     {
         TextureSubResData SubresData;
-        SubresData.pData       = nullptr;
-        SubresData.pSrcBuffer  = pSrcTexGL->GetPBO();
-        SubresData.SrcOffset   = TextureBaseGL::GetPBODataOffset(SrcTexDesc, CopyAttribs.SrcSlice, CopyAttribs.SrcMipLevel);
+        SubresData.pData      = nullptr;
+        SubresData.pSrcBuffer = pSrcTexGL->GetPBO();
+        SubresData.SrcOffset =
+            GetStagingTextureLocationOffset(SrcTexDesc, CopyAttribs.SrcSlice, CopyAttribs.SrcMipLevel,
+                                            TextureBaseGL::PBOOffsetAlignment,
+                                            pSrcBox->MinX, pSrcBox->MinY, pSrcBox->MinZ);
         SubresData.Stride      = SrcMipLevelAttribs.RowSize;
         SubresData.DepthStride = SrcMipLevelAttribs.DepthSliceSize;
-
-        const auto& SrcFmtAttribs = GetTextureFormatAttribs(SrcTexDesc.Format);
-        SubresData.SrcOffset +=
-            // For compressed-block formats, RowSize is the size of one compressed row.
-            // For non-compressed formats, BlockHeight is 1.
-            (pSrcBox->MinZ * SrcMipLevelAttribs.StorageHeight + pSrcBox->MinY) / SrcFmtAttribs.BlockHeight * SrcMipLevelAttribs.RowSize +
-            // For non-compressed formats, BlockWidth is 1.
-            (pSrcBox->MinX / SrcFmtAttribs.BlockWidth) * SrcFmtAttribs.GetElementSize();
 
         Box DstBox;
         DstBox.MinX = CopyAttribs.DstX;
@@ -1561,17 +1556,12 @@ void DeviceContextGLImpl::CopyTexture(const CopyTextureAttribs& CopyAttribs)
 
         auto* pDstBuffer = ValidatedCast<BufferGLImpl>(pDstTexGL->GetPBO());
         VERIFY(pDstBuffer != nullptr, "Internal staging buffer must not be null");
-        auto DstOffset = TextureBaseGL::GetPBODataOffset(DstTexDesc, CopyAttribs.DstSlice, CopyAttribs.DstMipLevel);
-
-        auto DstMipLevelAttribs = GetMipLevelProperties(DstTexDesc, CopyAttribs.DstMipLevel);
-
-        const auto& DstFmtAttribs = GetTextureFormatAttribs(DstTexDesc.Format);
-        DstOffset +=
-            // For compressed-block formats, RowSize is the size of one compressed row.
-            // For non-compressed formats, BlockHeight is 1.
-            (CopyAttribs.DstZ * DstMipLevelAttribs.StorageHeight + CopyAttribs.DstY) / DstFmtAttribs.BlockHeight * DstMipLevelAttribs.RowSize +
-            // For non-compressed formats, BlockWidth is 1.
-            (CopyAttribs.DstX / DstFmtAttribs.BlockWidth) * DstFmtAttribs.GetElementSize();
+        // GetStagingTextureLocationOffset assumes pixels are tightly packed in every subresource - no padding
+        // except between subresources.
+        const auto DstOffset =
+            GetStagingTextureLocationOffset(DstTexDesc, CopyAttribs.DstSlice, CopyAttribs.DstMipLevel,
+                                            TextureBaseGL::PBOOffsetAlignment,
+                                            CopyAttribs.DstX, CopyAttribs.DstY, CopyAttribs.DstZ);
 
         m_ContextState.BindBuffer(GL_PIXEL_PACK_BUFFER, pDstBuffer->GetGLHandle(), true);
 
@@ -1606,7 +1596,7 @@ void DeviceContextGLImpl::MapTextureSubresource(ITexture*                 pTextu
     const auto& TexDesc = pTexGL->GetDesc();
     if (TexDesc.Usage == USAGE_STAGING)
     {
-        auto PBOOffset       = TextureBaseGL::GetPBODataOffset(TexDesc, ArraySlice, MipLevel);
+        auto PBOOffset       = GetStagingTextureSubresourceOffset(TexDesc, ArraySlice, MipLevel, TextureBaseGL::PBOOffsetAlignment);
         auto MipLevelAttribs = GetMipLevelProperties(TexDesc, MipLevel);
         auto pPBO            = ValidatedCast<BufferGLImpl>(pTexGL->GetPBO());
         pPBO->MapRange(m_ContextState, MapType, MapFlags, PBOOffset, MipLevelAttribs.MipSize, MappedData.pData);

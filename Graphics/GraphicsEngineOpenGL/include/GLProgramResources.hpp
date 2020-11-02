@@ -147,6 +147,16 @@ public:
             ResourceDesc.Type      = ResourceType;
             return ResourceDesc;
         }
+
+        RESOURCE_DIMENSION GetResourceDimension() const
+        {
+            return RESOURCE_DIM_UNDEFINED;
+        }
+
+        bool IsMultisample() const
+        {
+            return false;
+        }
     };
 
     struct UniformBufferInfo final : GLResourceAttribs
@@ -499,8 +509,6 @@ private:
     SamplerInfo*        m_Samplers       = nullptr;
     ImageInfo*          m_Images         = nullptr;
     StorageBlockInfo*   m_StorageBlocks  = nullptr;
-
-    StringPool          m_StringPool;
 
     Uint32              m_NumUniformBuffers = 0;
     Uint32              m_NumSamplers       = 0;

@@ -257,39 +257,49 @@ void DeviceContextVkImpl::SetPipelineState(IPipelineState* pPipelineState)
     else
     {
         const auto& OldPSODesc = m_pPipelineState->GetDesc();
-        // Commit all graphics states when switching from compute pipeline
+        // Commit all graphics states when switching from non-graphics pipeline
         // This is necessary because if the command list had been flushed
         // and the first PSO set on the command list was a compute pipeline,
         // the states would otherwise never be committed (since m_pPipelineState != nullptr)
-        CommitStates = OldPSODesc.IsComputePipeline();
+        CommitStates = !OldPSODesc.IsAnyGraphicsPipeline();
         // We also need to update scissor rect if ScissorEnable state was disabled in previous pipeline
-        CommitScissor = !OldPSODesc.GraphicsPipeline.RasterizerDesc.ScissorEnable;
+        if (OldPSODesc.IsAnyGraphicsPipeline())
+            CommitScissor = !m_pPipelineState->GetGraphicsPipelineDesc().RasterizerDesc.ScissorEnable;
     }
 
     TDeviceContextBase::SetPipelineState(pPipelineStateVk, 0 /*Dummy*/);
     EnsureVkCmdBuffer();
 
-    if (PSODesc.IsComputePipeline())
-    {
-        auto vkPipeline = pPipelineStateVk->GetVkPipeline();
-        m_CommandBuffer.BindComputePipeline(vkPipeline);
-    }
-    else
-    {
-        auto vkPipeline = pPipelineStateVk->GetVkPipeline();
-        m_CommandBuffer.BindGraphicsPipeline(vkPipeline);
+    auto vkPipeline = pPipelineStateVk->GetVkPipeline();
 
-        if (CommitStates)
+    switch (PSODesc.PipelineType)
+    {
+        case PIPELINE_TYPE_GRAPHICS:
+        case PIPELINE_TYPE_MESH:
         {
-            m_CommandBuffer.SetStencilReference(m_StencilRef);
-            m_CommandBuffer.SetBlendConstants(m_BlendFactors);
-            CommitViewports();
-        }
+            auto& GraphicsPipeline = pPipelineStateVk->GetGraphicsPipelineDesc();
+            m_CommandBuffer.BindGraphicsPipeline(vkPipeline);
 
-        if (PSODesc.GraphicsPipeline.RasterizerDesc.ScissorEnable && (CommitStates || CommitScissor))
-        {
-            CommitScissorRects();
+            if (CommitStates)
+            {
+                m_CommandBuffer.SetStencilReference(m_StencilRef);
+                m_CommandBuffer.SetBlendConstants(m_BlendFactors);
+                CommitViewports();
+            }
+
+            if (GraphicsPipeline.RasterizerDesc.ScissorEnable && (CommitStates || CommitScissor))
+            {
+                CommitScissorRects();
+            }
+            break;
         }
+        case PIPELINE_TYPE_COMPUTE:
+        {
+            m_CommandBuffer.BindComputePipeline(vkPipeline);
+            break;
+        }
+        default:
+            UNEXPECTED("unknown pipeline type");
     }
 
     m_DescrSetBindInfo.Reset();
@@ -381,8 +391,11 @@ void DeviceContextVkImpl::CommitVkVertexBuffers()
 
 void DeviceContextVkImpl::DvpLogRenderPass_PSOMismatch()
 {
+    const auto& Desc       = m_pPipelineState->GetDesc();
+    const auto& GrPipeline = m_pPipelineState->GetGraphicsPipelineDesc();
+
     std::stringstream ss;
-    ss << "Active render pass is incomaptible with PSO '" << m_pPipelineState->GetDesc().Name
+    ss << "Active render pass is incomaptible with PSO '" << Desc.Name
        << "'. This indicates the mismatch between the number and/or format of bound render "
           "targets and/or depth stencil buffer and the PSO. Vulkand requires exact match.\n"
           "    Bound render targets ("
@@ -411,7 +424,6 @@ void DeviceContextVkImpl::DvpLogRenderPass_PSOMismatch()
         ss << "<Not set>";
     ss << "; Sample count: " << SampleCount;
 
-    const auto& GrPipeline = m_pPipelineState->GetDesc().GraphicsPipeline;
     ss << "\n    PSO: render targets (" << Uint32{GrPipeline.NumRenderTargets} << "): ";
     for (Uint32 rt = 0; rt < GrPipeline.NumRenderTargets; ++rt)
         ss << ' ' << GetTextureFormatAttribs(GrPipeline.RTVFormats[rt]).Name;
@@ -472,7 +484,7 @@ void DeviceContextVkImpl::PrepareForDraw(DRAW_FLAGS Flags)
 #    endif
 #endif
 
-    if (m_pPipelineState->GetDesc().GraphicsPipeline.pRenderPass == nullptr)
+    if (m_pPipelineState->GetGraphicsPipelineDesc().pRenderPass == nullptr)
     {
 #ifdef DILIGENT_DEVELOPMENT
         if (m_pPipelineState->GetRenderPass()->GetVkRenderPass() != m_vkRenderPass)
@@ -1110,7 +1122,7 @@ void DeviceContextVkImpl::SetViewports(Uint32 NumViewports, const Viewport* pVie
 
 void DeviceContextVkImpl::CommitScissorRects()
 {
-    VERIFY(m_pPipelineState && m_pPipelineState->GetDesc().GraphicsPipeline.RasterizerDesc.ScissorEnable, "Scissor test must be enabled in the graphics pipeline");
+    VERIFY(m_pPipelineState && m_pPipelineState->GetGraphicsPipelineDesc().RasterizerDesc.ScissorEnable, "Scissor test must be enabled in the graphics pipeline");
 
     if (m_NumScissorRects == 0)
         return; // Scissors have not been set in the context yet
@@ -1136,14 +1148,10 @@ void DeviceContextVkImpl::SetScissorRects(Uint32 NumRects, const Rect* pRects, U
     // Only commit scissor rects if scissor test is enabled in the rasterizer state.
     // If scissor is currently disabled, or no PSO is bound, scissor rects will be committed by
     // the SetPipelineState() when a PSO with enabled scissor test is set.
-    if (m_pPipelineState)
+    if (m_pPipelineState && m_pPipelineState->GetDesc().IsAnyGraphicsPipeline() && m_pPipelineState->GetGraphicsPipelineDesc().RasterizerDesc.ScissorEnable)
     {
-        const auto& PSODesc = m_pPipelineState->GetDesc();
-        if (PSODesc.IsAnyGraphicsPipeline() && PSODesc.GraphicsPipeline.RasterizerDesc.ScissorEnable)
-        {
-            VERIFY(NumRects == m_NumScissorRects, "Unexpected number of scissor rects");
-            CommitScissorRects();
-        }
+        VERIFY(NumRects == m_NumScissorRects, "Unexpected number of scissor rects");
+        CommitScissorRects();
     }
 }
 
@@ -1590,8 +1598,7 @@ void DeviceContextVkImpl::CopyTexture(const CopyTextureAttribs& CopyAttribs)
         FullMipBox.MaxZ      = MipLevelAttribs.Depth;
         pSrcBox              = &FullMipBox;
     }
-    const auto& DstFmtAttribs = GetTextureFormatAttribs(DstTexDesc.Format);
-    const auto& SrcFmtAttribs = GetTextureFormatAttribs(SrcTexDesc.Format);
+
     if (SrcTexDesc.Usage != USAGE_STAGING && DstTexDesc.Usage != USAGE_STAGING)
     {
         VkImageCopy CopyRegion = {};
@@ -1602,6 +1609,8 @@ void DeviceContextVkImpl::CopyTexture(const CopyTextureAttribs& CopyAttribs)
         CopyRegion.extent.width  = pSrcBox->MaxX - pSrcBox->MinX;
         CopyRegion.extent.height = std::max(pSrcBox->MaxY - pSrcBox->MinY, 1u);
         CopyRegion.extent.depth  = std::max(pSrcBox->MaxZ - pSrcBox->MinZ, 1u);
+
+        const auto& DstFmtAttribs = GetTextureFormatAttribs(DstTexDesc.Format);
 
         VkImageAspectFlags aspectMask = 0;
         if (DstFmtAttribs.ComponentType == COMPONENT_TYPE_DEPTH)
@@ -1634,15 +1643,18 @@ void DeviceContextVkImpl::CopyTexture(const CopyTextureAttribs& CopyAttribs)
         DEV_CHECK_ERR((SrcTexDesc.CPUAccessFlags & CPU_ACCESS_WRITE), "Attempting to copy from staging texture that was not created with CPU_ACCESS_WRITE flag");
         DEV_CHECK_ERR(pSrcTexVk->GetState() == RESOURCE_STATE_COPY_SOURCE, "Source staging texture must permanently be in RESOURCE_STATE_COPY_SOURCE state");
 
-        auto SrcBufferOffset    = GetStagingDataOffset(SrcTexDesc, CopyAttribs.SrcSlice, CopyAttribs.SrcMipLevel);
-        auto SrcMipLevelAttribs = GetMipLevelProperties(SrcTexDesc, CopyAttribs.SrcMipLevel);
         // address of (x,y,z) = region->bufferOffset + (((z * imageHeight) + y) * rowLength + x) * texelBlockSize; (18.4.1)
-        SrcBufferOffset +=
-            // For compressed-block formats, RowSize is the size of one compressed row.
-            // For non-compressed formats, BlockHeight is 1.
-            (pSrcBox->MinZ * SrcMipLevelAttribs.StorageHeight + pSrcBox->MinY) / SrcFmtAttribs.BlockHeight * SrcMipLevelAttribs.RowSize +
-            // For non-compressed formats, BlockWidth is 1.
-            (pSrcBox->MinX / SrcFmtAttribs.BlockWidth) * SrcFmtAttribs.GetElementSize();
+
+        // bufferOffset must be a multiple of 4 (18.4)
+        // If the calling command's VkImage parameter is a compressed image, bufferOffset
+        // must be a multiple of the compressed texel block size in bytes (18.4). This
+        // is automatically guaranteed as MipWidth and MipHeight are rounded to block size.
+
+        const auto SrcBufferOffset =
+            GetStagingTextureLocationOffset(SrcTexDesc, CopyAttribs.SrcSlice, CopyAttribs.SrcMipLevel,
+                                            TextureVkImpl::StagingBufferOffsetAlignment,
+                                            pSrcBox->MinX, pSrcBox->MinY, pSrcBox->MinZ);
+        const auto SrcMipLevelAttribs = GetMipLevelProperties(SrcTexDesc, CopyAttribs.SrcMipLevel);
 
         Box DstBox;
         DstBox.MinX = CopyAttribs.DstX;
@@ -1655,7 +1667,7 @@ void DeviceContextVkImpl::CopyTexture(const CopyTextureAttribs& CopyAttribs)
         CopyBufferToTexture(
             pSrcTexVk->GetVkStagingBuffer(),
             SrcBufferOffset,
-            SrcMipLevelAttribs.StorageWidth,
+            SrcMipLevelAttribs.StorageWidth, // GetStagingTextureLocationOffset assumes texels are tightly packed
             *pDstTexVk,
             DstBox,
             CopyAttribs.DstMipLevel,
@@ -1667,15 +1679,12 @@ void DeviceContextVkImpl::CopyTexture(const CopyTextureAttribs& CopyAttribs)
         DEV_CHECK_ERR((DstTexDesc.CPUAccessFlags & CPU_ACCESS_READ), "Attempting to copy to staging texture that was not created with CPU_ACCESS_READ flag");
         DEV_CHECK_ERR(pDstTexVk->GetState() == RESOURCE_STATE_COPY_DEST, "Destination staging texture must permanently be in RESOURCE_STATE_COPY_DEST state");
 
-        auto DstBufferOffset    = GetStagingDataOffset(DstTexDesc, CopyAttribs.DstSlice, CopyAttribs.DstMipLevel);
-        auto DstMipLevelAttribs = GetMipLevelProperties(DstTexDesc, CopyAttribs.DstMipLevel);
         // address of (x,y,z) = region->bufferOffset + (((z * imageHeight) + y) * rowLength + x) * texelBlockSize; (18.4.1)
-        DstBufferOffset +=
-            // For compressed-block formats, RowSize is the size of one compressed row.
-            // For non-compressed formats, BlockHeight is 1.
-            (CopyAttribs.DstZ * DstMipLevelAttribs.StorageHeight + CopyAttribs.DstY) / DstFmtAttribs.BlockHeight * DstMipLevelAttribs.RowSize *
-            // For non-compressed formats, BlockWidth is 1.
-            (CopyAttribs.DstX / DstFmtAttribs.BlockWidth) * DstFmtAttribs.GetElementSize();
+        const auto DstBufferOffset =
+            GetStagingTextureLocationOffset(DstTexDesc, CopyAttribs.DstSlice, CopyAttribs.DstMipLevel,
+                                            TextureVkImpl::StagingBufferOffsetAlignment,
+                                            CopyAttribs.DstX, CopyAttribs.DstY, CopyAttribs.DstZ);
+        const auto DstMipLevelAttribs = GetMipLevelProperties(DstTexDesc, CopyAttribs.DstMipLevel);
 
         CopyTextureToBuffer(
             *pSrcTexVk,
@@ -1685,7 +1694,8 @@ void DeviceContextVkImpl::CopyTexture(const CopyTextureAttribs& CopyAttribs)
             CopyAttribs.SrcTextureTransitionMode,
             pDstTexVk->GetVkStagingBuffer(),
             DstBufferOffset,
-            DstMipLevelAttribs.StorageWidth);
+            DstMipLevelAttribs.StorageWidth // GetStagingTextureLocationOffset assumes texels are tightly packed
+        );
     }
     else
     {
@@ -2007,8 +2017,9 @@ void DeviceContextVkImpl::MapTextureSubresource(ITexture*                 pTextu
     }
     else if (TexDesc.Usage == USAGE_STAGING)
     {
-        auto SubresourceOffset = GetStagingDataOffset(TexDesc, ArraySlice, MipLevel);
-        auto MipLevelAttribs   = GetMipLevelProperties(TexDesc, MipLevel);
+        auto SubresourceOffset =
+            GetStagingTextureSubresourceOffset(TexDesc, ArraySlice, MipLevel, TextureVkImpl::StagingBufferOffsetAlignment);
+        const auto MipLevelAttribs = GetMipLevelProperties(TexDesc, MipLevel);
         // address of (x,y,z) = region->bufferOffset + (((z * imageHeight) + y) * rowLength + x) * texelBlockSize; (18.4.1)
         auto MapStartOffset = SubresourceOffset +
             // For compressed-block formats, RowSize is the size of one compressed row.

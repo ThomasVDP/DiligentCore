@@ -358,11 +358,11 @@ m_pDevice->CreateShader(ShaderCI, &pShader);
 
 Diligent Engine follows Direct3D12/Vulkan style to configure the graphics/compute pipeline. One monolithic Pipelines State Object (PSO)
 encompasses all required states (all shader stages, input layout description, depth stencil, rasterizer and blend state
-descriptions etc.). To create a pipeline state object, define an instance of `PipelineStateCreateInfo` structure:
+descriptions etc.). To create a pipeline state object, define an instance of `GraphicsPipelineStateCreateInfo` structure:
 
 ```cpp
-PipelineStateCreateInfo PSOCreateInfo;
-PipelineStateDesc&      PSODesc = PSOCreateInfo.PSODesc;
+GraphicsPipelineStateCreateInfo PSOCreateInfo;
+PipelineStateDesc&              PSODesc = PSOCreateInfo.PSODesc;
 
 PSODesc.Name = "My pipeline state";
 ```
@@ -372,10 +372,10 @@ of render targets as well as depth-stencil format:
 
 ```cpp
 // This is a graphics pipeline
-PSODesc.PipelineType                      = PIPELINE_TYPE_GRAPHICS;
-PSODesc.GraphicsPipeline.NumRenderTargets = 1;
-PSODesc.GraphicsPipeline.RTVFormats[0]    = TEX_FORMAT_RGBA8_UNORM_SRGB;
-PSODesc.GraphicsPipeline.DSVFormat        = TEX_FORMAT_D32_FLOAT;
+PSODesc.PipelineType                            = PIPELINE_TYPE_GRAPHICS;
+PSOCreateInfo.GraphicsPipeline.NumRenderTargets = 1;
+PSOCreateInfo.GraphicsPipeline.RTVFormats[0]    = TEX_FORMAT_RGBA8_UNORM_SRGB;
+PSOCreateInfo.GraphicsPipeline.DSVFormat        = TEX_FORMAT_D32_FLOAT;
 ```
 
 Initialize depth-stencil state description structure DepthStencilStateDesc. Note that the constructor initializes
@@ -383,7 +383,7 @@ the members with default values and you may only set the ones that are different
 
 ```cpp
 // Init depth-stencil state
-DepthStencilStateDesc& DepthStencilDesc = PSODesc.GraphicsPipeline.DepthStencilDesc;
+DepthStencilStateDesc& DepthStencilDesc = PSOCreateInfo.GraphicsPipeline.DepthStencilDesc;
 DepthStencilDesc.DepthEnable            = true;
 DepthStencilDesc.DepthWriteEnable       = true;
 ```
@@ -392,7 +392,7 @@ Initialize blend state description structure `BlendStateDesc`:
 
 ```cpp
 // Init blend state
-BlendStateDesc& BSDesc = PSODesc.GraphicsPipeline.BlendDesc;
+BlendStateDesc& BSDesc = PSOCreateInfo.GraphicsPipeline.BlendDesc;
 BSDesc.IndependentBlendEnable = False;
 auto &RT0 = BSDesc.RenderTargets[0];
 RT0.BlendEnable           = True;
@@ -409,7 +409,7 @@ Initialize rasterizer state description structure `RasterizerStateDesc`:
 
 ```cpp
 // Init rasterizer state
-RasterizerStateDesc& RasterizerDesc = PSODesc.GraphicsPipeline.RasterizerDesc;
+RasterizerStateDesc& RasterizerDesc = PSOCreateInfo.GraphicsPipeline.RasterizerDesc;
 RasterizerDesc.FillMode              = FILL_MODE_SOLID;
 RasterizerDesc.CullMode              = CULL_MODE_NONE;
 RasterizerDesc.FrontCounterClockwise = True;
@@ -421,7 +421,7 @@ Initialize input layout description structure `InputLayoutDesc`:
 
 ```cpp
 // Define input layout
-InputLayoutDesc& Layout = PSODesc.GraphicsPipeline.InputLayout;
+InputLayoutDesc& Layout = PSOCreateInfo.GraphicsPipeline.InputLayout;
 LayoutElement LayoutElems[] =
 {
     LayoutElement( 0, 0, 3, VT_FLOAT32, False ),
@@ -436,9 +436,9 @@ Define primitive topology and set shader pointers:
 
 ```cpp
 // Define shader and primitive topology
-PSODesc.GraphicsPipeline.PrimitiveTopology = PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-PSODesc.GraphicsPipeline.pVS = m_pVS;
-PSODesc.GraphicsPipeline.pPS = m_pPS;
+PSOCreateInfo.GraphicsPipeline.PrimitiveTopology = PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+PSOCreateInfo.pVS = m_pVS;
+PSOCreateInfo.pPS = m_pPS;
 ```
 
 <a name="pipeline_resource_layout"></a>
@@ -486,11 +486,11 @@ PSODesc.ResourceLayout.NumStaticSamplers = 1;
 PSODesc.ResourceLayout.StaticSamplers    = &StaticSampler;
 ```
 
-When all required fields of PSO description structure are set, call `IRenderDevice::CreatePipelineState()`
+When all required fields of PSO description structure are set, call `IRenderDevice::CreateGraphicsPipelineState()`
 to create the PSO object:
 
 ```cpp
-m_pDevice->CreatePipelineState(PSOCreateInfo, &m_pPSO);
+m_pDevice->CreateGraphicsPipelineState(PSOCreateInfo, &m_pPSO);
 ```
 
 <a name="binding_resources"></a>
@@ -702,11 +702,16 @@ See [Apache 2.0 license](License.txt).
 
 This project has some third-party dependencies, each of which may have independent licensing:
 
-* [SPIRV-Cross](https://github.com/KhronosGroup/SPIRV-Cross): SPIRV parsing and cross-compilation tools.
-* [SPIRV-Headers](https://github.com/KhronosGroup/SPIRV-Headers): SPIRV header files.
-* [SPIRV-Tools](https://github.com/KhronosGroup/SPIRV-Tools): SPIRV optimization and validation tools.
-* [glslang](https://github.com/KhronosGroup/glslang): Khronos reference compiler and validator for GLSL, ESSL, and HLSL.
-* [glew](http://glew.sourceforge.net/): OpenGL Extension Wrangler Library.
+* [Vulkan-Headers](https://github.com/KhronosGroup/Vulkan-Headers): Vulkan Header files and API registry ([Apache License 2.0](https://github.com/DiligentGraphics/Vulkan-Headers/blob/master/LICENSE.txt)).
+* [SPIRV-Cross](https://github.com/KhronosGroup/SPIRV-Cross): SPIRV parsing and cross-compilation tools ([Apache License 2.0](https://github.com/DiligentGraphics/SPIRV-Cross/blob/master/LICENSE)).
+* [SPIRV-Headers](https://github.com/KhronosGroup/SPIRV-Headers): SPIRV header files ([Khronos MIT-like license](https://github.com/DiligentGraphics/SPIRV-Headers/blob/master/LICENSE)).
+* [SPIRV-Tools](https://github.com/KhronosGroup/SPIRV-Tools): SPIRV optimization and validation tools ([Apache License 2.0](https://github.com/DiligentGraphics/SPIRV-Tools/blob/master/LICENSE)).
+* [glslang](https://github.com/KhronosGroup/glslang): Khronos reference compiler and validator for GLSL, ESSL, and HLSL ([3-Clause BSD License, 2-Clause BSD License, MIT, Apache License 2.0](https://github.com/DiligentGraphics/glslang/blob/master/LICENSE.txt)).
+* [glew](http://glew.sourceforge.net/): OpenGL Extension Wrangler Library ([Mesa 3-D graphics library, Khronos MIT-like license](https://github.com/DiligentGraphics/DiligentCore/blob/master/ThirdParty/glew/LICENSE.txt)).
+* [volk](https://github.com/zeux/volk): Meta loader for Vulkan API ([Arseny Kapoulkine MIT-like license](https://github.com/DiligentGraphics/volk/blob/master/LICENSE.md)).
+* [stb](https://github.com/nothings/stb): stb single-file public domain libraries for C/C++ ([MIT License or public domain](https://github.com/DiligentGraphics/DiligentCore/blob/master/ThirdParty/stb/stb_image_write.h#L1581)).
+* [googletest](https://github.com/google/googletest): Google Testing and Mocking Framework ([BSD 3-Clause "New" or "Revised" License](https://github.com/DiligentGraphics/googletest/blob/master/LICENSE)).
+* [DirectXShaderCompiler](https://github.com/microsoft/DirectXShaderCompiler): LLVM/Clang-based DirectX Shader Compiler ([LLVM Release License](https://github.com/DiligentGraphics/DiligentCore/blob/master/ThirdParty/DirectXShaderCompiler/LICENSE.TXT)).
 
 <a name="contributing"></a>
 # Contributing

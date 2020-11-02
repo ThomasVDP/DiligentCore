@@ -41,6 +41,21 @@ static const INTERFACE_ID IID_RenderDeviceMtl =
 class IRenderDeviceMtl : public IRenderDevice
 {
 public:
+    /// Returns the pointer to Metal device (MTLDevice).
+    virtual id<MTLDevice> GetMtlDevice() const = 0;
+
+    /// Returns the pointer to Metal command queue (MTLCommandQueue).
+    virtual id<MTLCommandQueue> GetMtlCommandQueue() const = 0;
+
+    /// Creates a texture from existing Metal resource
+    virtual void DILIGENT_CALL_TYPE CreateTextureFromMtlResource(id<MTLTexture> mtlTexture,
+                                                                 RESOURCE_STATE InitialState,
+                                                                 ITexture**     ppTexture) = 0;
+
+    /// Creates a buffer from existing Metal resource
+    virtual void DILIGENT_CALL_TYPE CreateBufferFromMtlResource(id<MTLBuffer>  mtlBuffer,
+                                                                RESOURCE_STATE InitialState,
+                                                                IBuffer**      ppBuffer) = 0;
 };
 
 } // namespace Diligent

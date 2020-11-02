@@ -765,16 +765,16 @@ const Char* GetUsageString(USAGE Usage)
     {
         // clang-format off
 #define INIT_USGAGE_STR(Usage)UsageStrings[Usage] = #Usage
-        INIT_USGAGE_STR( USAGE_STATIC );
-        INIT_USGAGE_STR( USAGE_DEFAULT );
-        INIT_USGAGE_STR( USAGE_DYNAMIC );
-        INIT_USGAGE_STR( USAGE_STAGING );
-        INIT_USGAGE_STR( USAGE_UNIFIED );
+        INIT_USGAGE_STR(USAGE_IMMUTABLE);
+        INIT_USGAGE_STR(USAGE_DEFAULT);
+        INIT_USGAGE_STR(USAGE_DYNAMIC);
+        INIT_USGAGE_STR(USAGE_STAGING);
+        INIT_USGAGE_STR(USAGE_UNIFIED);
 #undef  INIT_USGAGE_STR
         // clang-format on
         bUsageStringsInit = true;
     }
-    if (Usage >= USAGE_STATIC && Usage < USAGE_NUM_USAGES)
+    if (Usage >= USAGE_IMMUTABLE && Usage < USAGE_NUM_USAGES)
         return UsageStrings[Usage];
     else
     {
@@ -791,13 +791,13 @@ const Char* GetResourceDimString(RESOURCE_DIMENSION TexType)
     {
         TexTypeStrings[RESOURCE_DIM_UNDEFINED]      = "Undefined";
         TexTypeStrings[RESOURCE_DIM_BUFFER]         = "Buffer";
-        TexTypeStrings[RESOURCE_DIM_TEX_1D]         = "Tex 1D";
-        TexTypeStrings[RESOURCE_DIM_TEX_1D_ARRAY]   = "Tex 1D Array";
-        TexTypeStrings[RESOURCE_DIM_TEX_2D]         = "Tex 2D";
-        TexTypeStrings[RESOURCE_DIM_TEX_2D_ARRAY]   = "Tex 2D Array";
-        TexTypeStrings[RESOURCE_DIM_TEX_3D]         = "Tex 3D";
-        TexTypeStrings[RESOURCE_DIM_TEX_CUBE]       = "Tex Cube";
-        TexTypeStrings[RESOURCE_DIM_TEX_CUBE_ARRAY] = "Tex Cube Array";
+        TexTypeStrings[RESOURCE_DIM_TEX_1D]         = "Texture 1D";
+        TexTypeStrings[RESOURCE_DIM_TEX_1D_ARRAY]   = "Texture 1D Array";
+        TexTypeStrings[RESOURCE_DIM_TEX_2D]         = "Texture 2D";
+        TexTypeStrings[RESOURCE_DIM_TEX_2D_ARRAY]   = "Texture 2D Array";
+        TexTypeStrings[RESOURCE_DIM_TEX_3D]         = "Texture 3D";
+        TexTypeStrings[RESOURCE_DIM_TEX_CUBE]       = "Texture Cube";
+        TexTypeStrings[RESOURCE_DIM_TEX_CUBE_ARRAY] = "Texture Cube Array";
         static_assert(RESOURCE_DIM_NUM_DIMENSIONS == RESOURCE_DIM_TEX_CUBE_ARRAY + 1, "Not all texture type strings initialized.");
 
         bTexTypeStrsInit = true;
@@ -1316,7 +1316,7 @@ Int32 GetShaderTypePipelineIndex(SHADER_TYPE ShaderType, PIPELINE_TYPE PipelineT
 {
     VERIFY(IsConsistentShaderType(ShaderType, PipelineType), "Shader type ", GetShaderTypeLiteralName(ShaderType),
            " is inconsistent with pipeline type ", GetPipelineTypeString(PipelineType));
-    VERIFY(IsPowerOfTwo(Uint32{ShaderType}), "Only single shader stage should be provided");
+    VERIFY(IsPowerOfTwo(Uint32{ShaderType}), "More than one shader type is specified");
 
     static_assert(SHADER_TYPE_LAST == 0x080, "Please update the switch below to handle the new shader type");
     switch (ShaderType)
@@ -1394,5 +1394,73 @@ SHADER_TYPE GetShaderTypeFromPipelineIndex(Int32 Index, PIPELINE_TYPE PipelineTy
             return SHADER_TYPE_UNKNOWN;
     }
 }
+
+
+Uint32 GetStagingTextureLocationOffset(const TextureDesc& TexDesc,
+                                       Uint32             ArraySlice,
+                                       Uint32             MipLevel,
+                                       Uint32             Alignment,
+                                       Uint32             LocationX,
+                                       Uint32             LocationY,
+                                       Uint32             LocationZ)
+{
+    VERIFY_EXPR(ArraySlice < TexDesc.ArraySize && MipLevel < TexDesc.MipLevels || ArraySlice == TexDesc.ArraySize && MipLevel == 0);
+
+    Uint32 Offset = 0;
+    if (ArraySlice > 0)
+    {
+        Uint32 ArraySliceSize = 0;
+        for (Uint32 mip = 0; mip < TexDesc.MipLevels; ++mip)
+        {
+            auto MipInfo = GetMipLevelProperties(TexDesc, mip);
+            ArraySliceSize += Align(MipInfo.MipSize, Alignment);
+        }
+
+        Offset = ArraySliceSize;
+        if (TexDesc.Type == RESOURCE_DIM_TEX_1D_ARRAY ||
+            TexDesc.Type == RESOURCE_DIM_TEX_2D_ARRAY ||
+            TexDesc.Type == RESOURCE_DIM_TEX_CUBE ||
+            TexDesc.Type == RESOURCE_DIM_TEX_CUBE_ARRAY)
+            Offset *= ArraySlice;
+    }
+
+    for (Uint32 mip = 0; mip < MipLevel; ++mip)
+    {
+        auto MipInfo = GetMipLevelProperties(TexDesc, mip);
+        Offset += Align(MipInfo.MipSize, Alignment);
+    }
+
+    if (ArraySlice == TexDesc.ArraySize)
+    {
+        VERIFY(LocationX == 0 && LocationY == 0 && LocationZ == 0,
+               "Staging buffer size is requested: location must be (0,0,0).");
+    }
+    else if (LocationX != 0 || LocationY != 0 || LocationZ != 0)
+    {
+        const auto& MipLevelAttribs = GetMipLevelProperties(TexDesc, MipLevel);
+        const auto& FmtAttribs      = GetTextureFormatAttribs(TexDesc.Format);
+        VERIFY(LocationX < MipLevelAttribs.LogicalWidth && LocationY < MipLevelAttribs.LogicalHeight && LocationZ < MipLevelAttribs.Depth,
+               "Specified location is out of bounds");
+        if (FmtAttribs.ComponentType == COMPONENT_TYPE_COMPRESSED)
+        {
+            VERIFY((LocationX % FmtAttribs.BlockWidth) == 0 && (LocationY % FmtAttribs.BlockHeight) == 0,
+                   "For compressed texture formats, location must be a multiple of compressed block size.");
+        }
+
+        // For compressed-block formats, RowSize is the size of one compressed row.
+        // For non-compressed formats, BlockHeight is 1.
+        Offset += (LocationZ * MipLevelAttribs.StorageHeight + LocationY) / FmtAttribs.BlockHeight * MipLevelAttribs.RowSize;
+
+        // For non-compressed formats, BlockWidth is 1.
+        Offset += (LocationX / FmtAttribs.BlockWidth) * FmtAttribs.GetElementSize();
+
+        // Note: this addressing complies with how Vulkan (as well as OpenGL/GLES and Metal) address
+        // textures when copying data to/from buffers:
+        //      address of (x,y,z) = bufferOffset + (((z * imageHeight) + y) * rowLength + x) * texelBlockSize; (18.4.1)
+    }
+
+    return Offset;
+}
+
 
 } // namespace Diligent

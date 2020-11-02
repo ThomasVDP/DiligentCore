@@ -42,8 +42,6 @@ namespace Diligent
 
 class FixedBlockMemoryAllocator;
 
-Uint32 GetStagingDataOffset(const TextureDesc& TexDesc, Uint32 ArraySlice, Uint32 MipLevel, Uint32 Alignment = 4);
-
 /// Texture object implementation in Vulkan backend.
 class TextureVkImpl final : public TextureBase<ITextureVk, RenderDeviceVkImpl, TextureViewVkImpl, FixedBlockMemoryAllocator>
 {
@@ -100,6 +98,9 @@ public:
     }
 
     void InvalidateStagingRange(VkDeviceSize Offset, VkDeviceSize Size);
+
+    // Buffer offset must be a multiple of 4 (18.4)
+    static constexpr Uint32 StagingBufferOffsetAlignment = 4;
 
 protected:
     void CreateViewInternal(const struct TextureViewDesc& ViewDesc, ITextureView** ppView, bool bIsDefaultView) override;

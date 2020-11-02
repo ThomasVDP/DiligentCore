@@ -329,6 +329,9 @@ RenderDeviceGLImpl::RenderDeviceGLImpl(IReferenceCounters*       pRefCounters,
         SET_FEATURE_STATE(WireframeFill, WireframeFillSupported, "Wireframe fill is");
     }
 
+    if (InitAttribs.ForceNonSeparablePrograms)
+        LOG_INFO_MESSAGE("Forcing non-separable shader programs");
+
     if (m_DeviceCaps.DevType == RENDER_DEVICE_TYPE_GL)
     {
         const bool IsGL46OrAbove = (MajorVersion >= 5) || (MajorVersion == 4 && MinorVersion >= 6);
@@ -336,7 +339,8 @@ RenderDeviceGLImpl::RenderDeviceGLImpl(IReferenceCounters*       pRefCounters,
         const bool IsGL42OrAbove = (MajorVersion >= 5) || (MajorVersion == 4 && MinorVersion >= 2);
         const bool IsGL41OrAbove = (MajorVersion >= 5) || (MajorVersion == 4 && MinorVersion >= 1);
 
-        Features.SeparablePrograms = DEVICE_FEATURE_STATE_ENABLED;
+        SET_FEATURE_STATE(SeparablePrograms, !InitAttribs.ForceNonSeparablePrograms, "Separable programs are");
+        SET_FEATURE_STATE(ShaderResourceQueries, Features.SeparablePrograms != DEVICE_FEATURE_STATE_DISABLED, "Shader resource queries are");
         Features.IndirectRendering = DEVICE_FEATURE_STATE_ENABLED;
         Features.WireframeFill     = DEVICE_FEATURE_STATE_ENABLED;
         // clang-format off
@@ -359,6 +363,14 @@ RenderDeviceGLImpl::RenderDeviceGLImpl(IReferenceCounters*       pRefCounters,
         SET_FEATURE_STATE(MultiViewport,             IsGL41OrAbove || CheckExtension("GL_ARB_viewport_array"),          "Multi viewport is");
         SET_FEATURE_STATE(PixelUAVWritesAndAtomics,  IsGL42OrAbove || CheckExtension("GL_ARB_shader_image_load_store"), "Pixel UAV writes and atomics are");
         SET_FEATURE_STATE(TextureUAVExtendedFormats, false,                                                             "Texture UAV extended formats are");
+
+        SET_FEATURE_STATE(ShaderFloat16,             CheckExtension("GL_EXT_shader_explicit_arithmetic_types_float16"), "16-bit float shader operations are");
+        SET_FEATURE_STATE(ResourceBuffer16BitAccess, CheckExtension("GL_EXT_shader_16bit_storage"),                     "16-bit resoure buffer access is");
+        SET_FEATURE_STATE(UniformBuffer16BitAccess,  CheckExtension("GL_EXT_shader_16bit_storage"),                     "16-bit uniform buffer access is");
+        SET_FEATURE_STATE(ShaderInputOutput16,       false,                                                             "16-bit shader inputs/outputs are");
+        SET_FEATURE_STATE(ShaderInt8,                CheckExtension("GL_EXT_shader_explicit_arithmetic_types_int8"),    "8-bit integer shader operations are");
+        SET_FEATURE_STATE(ResourceBuffer8BitAccess,  CheckExtension("GL_EXT_shader_8bit_storage"),                      "8-bit resoure buffer access is");
+        SET_FEATURE_STATE(UniformBuffer8BitAccess,   CheckExtension("GL_EXT_shader_8bit_storage"),                      "8-bit uniform buffer access is");
         // clang-format on
 
         TexCaps.MaxTexture1DDimension     = MaxTextureSize;
@@ -387,7 +399,8 @@ RenderDeviceGLImpl::RenderDeviceGLImpl(IReferenceCounters*       pRefCounters,
         bool IsGLES32OrAbove = (MajorVersion >= 4) || (MajorVersion == 3 && MinorVersion >= 2);
 
         // clang-format off
-        SET_FEATURE_STATE(SeparablePrograms,             IsGLES31OrAbove || strstr(Extensions, "separate_shader_objects"), "Separable programs are");
+        SET_FEATURE_STATE(SeparablePrograms,             (IsGLES31OrAbove || strstr(Extensions, "separate_shader_objects")) && !InitAttribs.ForceNonSeparablePrograms, "Separable programs are");
+        SET_FEATURE_STATE(ShaderResourceQueries,         Features.SeparablePrograms != DEVICE_FEATURE_STATE_DISABLED,      "Shader resource queries are");
         SET_FEATURE_STATE(IndirectRendering,             IsGLES31OrAbove || strstr(Extensions, "draw_indirect"),           "Indirect rendering is");
         SET_FEATURE_STATE(WireframeFill,                 false, "Wireframe fill is");
         SET_FEATURE_STATE(MultithreadedResourceCreation, false, "Multithreaded resource creation is");
@@ -413,6 +426,14 @@ RenderDeviceGLImpl::RenderDeviceGLImpl(IReferenceCounters*       pRefCounters,
         SET_FEATURE_STATE(MultiViewport,             strstr(Extensions, "viewport_array"),      "Multi viewport");
         SET_FEATURE_STATE(PixelUAVWritesAndAtomics,  IsGLES31OrAbove || strstr(Extensions, "shader_image_load_store"), "Pixel UAV writes and atomics");
         SET_FEATURE_STATE(TextureUAVExtendedFormats, false, "Texture UAV extended formats");
+
+        SET_FEATURE_STATE(ShaderFloat16,             strstr(Extensions, "shader_explicit_arithmetic_types_float16"), "16-bit float shader operations are");
+        SET_FEATURE_STATE(ResourceBuffer16BitAccess, strstr(Extensions, "shader_16bit_storage"),                     "16-bit resoure buffer access is");
+        SET_FEATURE_STATE(UniformBuffer16BitAccess,  strstr(Extensions, "shader_16bit_storage"),                     "16-bit uniform buffer access is");
+        SET_FEATURE_STATE(ShaderInputOutput16,       false,                                                          "16-bit shader inputs/outputs are");
+        SET_FEATURE_STATE(ShaderInt8,                strstr(Extensions, "shader_explicit_arithmetic_types_int8"),    "8-bit integer shader operations are");
+        SET_FEATURE_STATE(ResourceBuffer8BitAccess,  strstr(Extensions, "shader_8bit_storage"),                      "8-bit resoure buffer access is");
+        SET_FEATURE_STATE(UniformBuffer8BitAccess,   strstr(Extensions, "shader_8bit_storage"),                      "8-bit uniform buffer access is");
         // clang-format on
 
         TexCaps.MaxTexture1DDimension     = 0; // Not supported in GLES 3.2
@@ -438,6 +459,10 @@ RenderDeviceGLImpl::RenderDeviceGLImpl(IReferenceCounters*       pRefCounters,
     SET_FEATURE_STATE(TextureCompressionBC, bRGTC && bBPTC && bS3TC, "BC texture compression is");
 
 #undef SET_FEATURE_STATE
+
+#if defined(_MSC_VER) && defined(_WIN64)
+    static_assert(sizeof(DeviceFeatures) == 31, "Did you add a new feature to DeviceFeatures? Please handle its satus here.");
+#endif
 }
 
 RenderDeviceGLImpl::~RenderDeviceGLImpl()
@@ -676,13 +701,8 @@ void RenderDeviceGLImpl::CreateSampler(const SamplerDesc& SamplerDesc, ISampler*
     CreateSampler(SamplerDesc, ppSampler, false);
 }
 
-
-void RenderDeviceGLImpl::CreatePipelineState(const PipelineStateCreateInfo& PSOCreateInfo, IPipelineState** ppPipelineState)
-{
-    CreatePipelineState(PSOCreateInfo, ppPipelineState, false);
-}
-
-void RenderDeviceGLImpl::CreatePipelineState(const PipelineStateCreateInfo& PSOCreateInfo, IPipelineState** ppPipelineState, bool bIsDeviceInternal)
+template <typename PSOCreateInfoType>
+void RenderDeviceGLImpl::CreatePipelineState(const PSOCreateInfoType& PSOCreateInfo, IPipelineState** ppPipelineState, bool bIsDeviceInternal)
 {
     CreateDeviceObject(
         "Pipeline state", PSOCreateInfo.PSODesc, ppPipelineState,
@@ -693,6 +713,26 @@ void RenderDeviceGLImpl::CreatePipelineState(const PipelineStateCreateInfo& PSOC
             OnCreateDeviceObject(pPipelineStateOGL);
         } //
     );
+}
+
+void RenderDeviceGLImpl::CreateGraphicsPipelineState(const GraphicsPipelineStateCreateInfo& PSOCreateInfo, IPipelineState** ppPipelineState, bool bIsDeviceInternal)
+{
+    CreatePipelineState(PSOCreateInfo, ppPipelineState, bIsDeviceInternal);
+}
+
+void RenderDeviceGLImpl::CreateComputePipelineState(const ComputePipelineStateCreateInfo& PSOCreateInfo, IPipelineState** ppPipelineState, bool bIsDeviceInternal)
+{
+    CreatePipelineState(PSOCreateInfo, ppPipelineState, bIsDeviceInternal);
+}
+
+void RenderDeviceGLImpl::CreateGraphicsPipelineState(const GraphicsPipelineStateCreateInfo& PSOCreateInfo, IPipelineState** ppPipelineState)
+{
+    return CreateGraphicsPipelineState(PSOCreateInfo, ppPipelineState, false);
+}
+
+void RenderDeviceGLImpl::CreateComputePipelineState(const ComputePipelineStateCreateInfo& PSOCreateInfo, IPipelineState** ppPipelineState)
+{
+    return CreateComputePipelineState(PSOCreateInfo, ppPipelineState, false);
 }
 
 void RenderDeviceGLImpl::CreateFence(const FenceDesc& Desc, IFence** ppFence)

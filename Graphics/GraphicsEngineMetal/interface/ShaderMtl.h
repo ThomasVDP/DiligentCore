@@ -41,6 +41,8 @@ static const INTERFACE_ID IID_ShaderMtl =
 class IShaderMtl : public IShader
 {
 public:
+    /// Returns the point to Metal shader function (MTLFunction)
+    virtual id<MTLFunction> GetMtlShaderFunction() const = 0;
 };
 
 } // namespace Diligent

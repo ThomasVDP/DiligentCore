@@ -32,7 +32,7 @@
 #include "TestingEnvironment.hpp"
 
 #define VK_NO_PROTOTYPES
-#include "vulkan/vulkan.h"
+#include "Vulkan-Headers/include/vulkan/vulkan.h"
 
 namespace Diligent
 {
@@ -43,9 +43,8 @@ namespace Testing
 class TestingEnvironmentVk final : public TestingEnvironment
 {
 public:
-    TestingEnvironmentVk(RENDER_DEVICE_TYPE   deviceType,
-                         ADAPTER_TYPE         AdapterType,
-                         Uint32               AdapterId,
+    using CreateInfo = TestingEnvironment::CreateInfo;
+    TestingEnvironmentVk(const CreateInfo&    CI,
                          const SwapChainDesc& SCDesc);
     ~TestingEnvironmentVk();
 

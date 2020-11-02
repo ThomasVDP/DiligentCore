@@ -1172,10 +1172,10 @@ static VkAccessFlags ResourceStateFlagToVkAccessFlags(RESOURCE_STATE StateFlag)
         case RESOURCE_STATE_INDIRECT_ARGUMENT: return VK_ACCESS_INDIRECT_COMMAND_READ_BIT;
         case RESOURCE_STATE_COPY_DEST:         return VK_ACCESS_TRANSFER_WRITE_BIT;
         case RESOURCE_STATE_COPY_SOURCE:       return VK_ACCESS_TRANSFER_READ_BIT;
-        case RESOURCE_STATE_RESOLVE_DEST:      return VK_ACCESS_MEMORY_READ_BIT;
-        case RESOURCE_STATE_RESOLVE_SOURCE:    return VK_ACCESS_MEMORY_WRITE_BIT;
+        case RESOURCE_STATE_RESOLVE_DEST:      return VK_ACCESS_TRANSFER_WRITE_BIT;
+        case RESOURCE_STATE_RESOLVE_SOURCE:    return VK_ACCESS_TRANSFER_READ_BIT;
         case RESOURCE_STATE_INPUT_ATTACHMENT:  return VK_ACCESS_INPUT_ATTACHMENT_READ_BIT;
-        case RESOURCE_STATE_PRESENT:           return VK_ACCESS_MEMORY_READ_BIT;
+        case RESOURCE_STATE_PRESENT:           return 0;
             // clang-format on
 
         default:
@@ -1252,8 +1252,8 @@ RESOURCE_STATE VkAccessFlagsToResourceStates(VkAccessFlagBits AccessFlagBit)
         case VK_ACCESS_TRANSFORM_FEEDBACK_COUNTER_READ_BIT_EXT:   return RESOURCE_STATE_UNKNOWN;
         case VK_ACCESS_TRANSFORM_FEEDBACK_COUNTER_WRITE_BIT_EXT:  return RESOURCE_STATE_UNKNOWN;
         case VK_ACCESS_CONDITIONAL_RENDERING_READ_BIT_EXT:        return RESOURCE_STATE_UNKNOWN;
-        case VK_ACCESS_COMMAND_PROCESS_READ_BIT_NVX:              return RESOURCE_STATE_UNKNOWN;
-        case VK_ACCESS_COMMAND_PROCESS_WRITE_BIT_NVX:             return RESOURCE_STATE_UNKNOWN;
+        case VK_ACCESS_COMMAND_PREPROCESS_READ_BIT_NV:            return RESOURCE_STATE_UNKNOWN;
+        case VK_ACCESS_COMMAND_PREPROCESS_WRITE_BIT_NV:           return RESOURCE_STATE_UNKNOWN;
         case VK_ACCESS_COLOR_ATTACHMENT_READ_NONCOHERENT_BIT_EXT: return RESOURCE_STATE_UNKNOWN;
         case VK_ACCESS_SHADING_RATE_IMAGE_READ_BIT_NV:            return RESOURCE_STATE_UNKNOWN;
         case VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_NV:        return RESOURCE_STATE_UNKNOWN;
@@ -1510,5 +1510,28 @@ VkAccessFlags AccessFlagsToVkAccessFlags(ACCESS_FLAGS AccessFlags)
     return static_cast<VkAccessFlags>(AccessFlags);
 }
 #undef ASSERT_SAME
+
+
+VkShaderStageFlagBits ShaderTypeToVkShaderStageFlagBit(SHADER_TYPE ShaderType)
+{
+    static_assert(SHADER_TYPE_LAST == SHADER_TYPE_MESH, "Please update the switch below to handle the new shader type");
+    VERIFY(IsPowerOfTwo(Uint32{ShaderType}), "More than one shader type is specified");
+    switch (ShaderType)
+    {
+        // clang-format off
+        case SHADER_TYPE_VERTEX:           return VK_SHADER_STAGE_VERTEX_BIT;
+        case SHADER_TYPE_HULL:             return VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT;
+        case SHADER_TYPE_DOMAIN:           return VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT;
+        case SHADER_TYPE_GEOMETRY:         return VK_SHADER_STAGE_GEOMETRY_BIT;
+        case SHADER_TYPE_PIXEL:            return VK_SHADER_STAGE_FRAGMENT_BIT;
+        case SHADER_TYPE_COMPUTE:          return VK_SHADER_STAGE_COMPUTE_BIT;
+        case SHADER_TYPE_AMPLIFICATION:    return VK_SHADER_STAGE_TASK_BIT_NV;
+        case SHADER_TYPE_MESH:             return VK_SHADER_STAGE_MESH_BIT_NV;
+        // clang-format on
+        default:
+            UNEXPECTED("Unknown shader type");
+            return VK_SHADER_STAGE_VERTEX_BIT;
+    }
+}
 
 } // namespace Diligent

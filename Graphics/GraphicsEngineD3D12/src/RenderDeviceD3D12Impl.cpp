@@ -251,8 +251,53 @@ RenderDeviceD3D12Impl::RenderDeviceD3D12Impl(IReferenceCounters*          pRefCo
 
         m_DeviceCaps.Features.MeshShaders = MeshShadersSupported ? DEVICE_FEATURE_STATE_ENABLED : DEVICE_FEATURE_STATE_DISABLED;
 
+
+        {
+            D3D12_FEATURE_DATA_D3D12_OPTIONS d3d12Features = {};
+            if (SUCCEEDED(m_pd3d12Device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS, &d3d12Features, sizeof(d3d12Features))))
+            {
+                if (d3d12Features.MinPrecisionSupport & D3D12_SHADER_MIN_PRECISION_SUPPORT_16_BIT)
+                {
+                    m_DeviceCaps.Features.ShaderFloat16 = DEVICE_FEATURE_STATE_ENABLED;
+                }
+            }
+        }
+
+        {
+            D3D12_FEATURE_DATA_D3D12_OPTIONS4 d3d12Features4 = {};
+            if (SUCCEEDED(m_pd3d12Device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS4, &d3d12Features4, sizeof(d3d12Features4))))
+            {
+                if (d3d12Features4.Native16BitShaderOpsSupported)
+                {
+                    m_DeviceCaps.Features.ResourceBuffer16BitAccess = DEVICE_FEATURE_STATE_ENABLED;
+                    m_DeviceCaps.Features.UniformBuffer16BitAccess  = DEVICE_FEATURE_STATE_ENABLED;
+                    m_DeviceCaps.Features.ShaderInputOutput16       = DEVICE_FEATURE_STATE_ENABLED;
+                }
+            }
+        }
+
+#define CHECK_REQUIRED_FEATURE(Feature, FeatureName)                          \
+    do                                                                        \
+    {                                                                         \
+        if (EngineCI.Features.Feature == DEVICE_FEATURE_STATE_ENABLED &&      \
+            m_DeviceCaps.Features.Feature != DEVICE_FEATURE_STATE_ENABLED)    \
+            LOG_ERROR_AND_THROW(FeatureName, "not supported by this device"); \
+    } while (false)
+
+        // clang-format off
+        CHECK_REQUIRED_FEATURE(ShaderFloat16,             "16-bit float shader operations are");
+        CHECK_REQUIRED_FEATURE(ResourceBuffer16BitAccess, "16-bit resoure buffer access is");
+        CHECK_REQUIRED_FEATURE(UniformBuffer16BitAccess,  "16-bit uniform buffer access is");
+        CHECK_REQUIRED_FEATURE(ShaderInputOutput16,       "16-bit shader inputs/outputs are");
+
+        CHECK_REQUIRED_FEATURE(ShaderInt8,               "8-bit shader operations are");
+        CHECK_REQUIRED_FEATURE(ResourceBuffer8BitAccess, "8-bit resoure buffer access is");
+        CHECK_REQUIRED_FEATURE(UniformBuffer8BitAccess,  "8-bit uniform buffer access is");
+        // clang-format on
+#undef CHECK_REQUIRED_FEATURE
+
 #if defined(_MSC_VER) && defined(_WIN64)
-        static_assert(sizeof(DeviceFeatures) == 23, "Did you add a new feature to DeviceFeatures? Please handle its satus here.");
+        static_assert(sizeof(DeviceFeatures) == 31, "Did you add a new feature to DeviceFeatures? Please handle its satus here.");
 #endif
 
         auto& TexCaps = m_DeviceCaps.TexCaps;
@@ -489,15 +534,27 @@ void RenderDeviceD3D12Impl::TestTextureFormat(TEXTURE_FORMAT TexFormat)
 
 IMPLEMENT_QUERY_INTERFACE(RenderDeviceD3D12Impl, IID_RenderDeviceD3D12, TRenderDeviceBase)
 
-void RenderDeviceD3D12Impl::CreatePipelineState(const PipelineStateCreateInfo& PSOCreateInfo, IPipelineState** ppPipelineState)
+template <typename PSOCreateInfoType>
+void RenderDeviceD3D12Impl::CreatePipelineState(const PSOCreateInfoType& PSOCreateInfo, IPipelineState** ppPipelineState)
 {
     CreateDeviceObject("Pipeline State", PSOCreateInfo.PSODesc, ppPipelineState,
                        [&]() //
                        {
-                           PipelineStateD3D12Impl* pPipelineStateD3D12(NEW_RC_OBJ(m_PSOAllocator, "PipelineStateD3D12Impl instance", PipelineStateD3D12Impl)(this, PSOCreateInfo));
+                           PipelineStateD3D12Impl* pPipelineStateD3D12{NEW_RC_OBJ(m_PSOAllocator, "PipelineStateD3D12Impl instance", PipelineStateD3D12Impl)(this, PSOCreateInfo)};
                            pPipelineStateD3D12->QueryInterface(IID_PipelineState, reinterpret_cast<IObject**>(ppPipelineState));
                            OnCreateDeviceObject(pPipelineStateD3D12);
                        });
+}
+
+
+void RenderDeviceD3D12Impl::CreateGraphicsPipelineState(const GraphicsPipelineStateCreateInfo& PSOCreateInfo, IPipelineState** ppPipelineState)
+{
+    CreatePipelineState(PSOCreateInfo, ppPipelineState);
+}
+
+void RenderDeviceD3D12Impl::CreateComputePipelineState(const ComputePipelineStateCreateInfo& PSOCreateInfo, IPipelineState** ppPipelineState)
+{
+    CreatePipelineState(PSOCreateInfo, ppPipelineState);
 }
 
 void RenderDeviceD3D12Impl::CreateBufferFromD3DResource(ID3D12Resource* pd3d12Buffer, const BufferDesc& BuffDesc, RESOURCE_STATE InitialState, IBuffer** ppBuffer)
@@ -505,7 +562,7 @@ void RenderDeviceD3D12Impl::CreateBufferFromD3DResource(ID3D12Resource* pd3d12Bu
     CreateDeviceObject("buffer", BuffDesc, ppBuffer,
                        [&]() //
                        {
-                           BufferD3D12Impl* pBufferD3D12(NEW_RC_OBJ(m_BufObjAllocator, "BufferD3D12Impl instance", BufferD3D12Impl)(m_BuffViewObjAllocator, this, BuffDesc, InitialState, pd3d12Buffer));
+                           BufferD3D12Impl* pBufferD3D12{NEW_RC_OBJ(m_BufObjAllocator, "BufferD3D12Impl instance", BufferD3D12Impl)(m_BuffViewObjAllocator, this, BuffDesc, InitialState, pd3d12Buffer)};
                            pBufferD3D12->QueryInterface(IID_Buffer, reinterpret_cast<IObject**>(ppBuffer));
                            pBufferD3D12->CreateDefaultViews();
                            OnCreateDeviceObject(pBufferD3D12);
@@ -517,7 +574,7 @@ void RenderDeviceD3D12Impl::CreateBuffer(const BufferDesc& BuffDesc, const Buffe
     CreateDeviceObject("buffer", BuffDesc, ppBuffer,
                        [&]() //
                        {
-                           BufferD3D12Impl* pBufferD3D12(NEW_RC_OBJ(m_BufObjAllocator, "BufferD3D12Impl instance", BufferD3D12Impl)(m_BuffViewObjAllocator, this, BuffDesc, pBuffData));
+                           BufferD3D12Impl* pBufferD3D12{NEW_RC_OBJ(m_BufObjAllocator, "BufferD3D12Impl instance", BufferD3D12Impl)(m_BuffViewObjAllocator, this, BuffDesc, pBuffData)};
                            pBufferD3D12->QueryInterface(IID_Buffer, reinterpret_cast<IObject**>(ppBuffer));
                            pBufferD3D12->CreateDefaultViews();
                            OnCreateDeviceObject(pBufferD3D12);
@@ -530,7 +587,7 @@ void RenderDeviceD3D12Impl::CreateShader(const ShaderCreateInfo& ShaderCI, IShad
     CreateDeviceObject("shader", ShaderCI.Desc, ppShader,
                        [&]() //
                        {
-                           ShaderD3D12Impl* pShaderD3D12(NEW_RC_OBJ(m_ShaderObjAllocator, "ShaderD3D12Impl instance", ShaderD3D12Impl)(this, ShaderCI));
+                           ShaderD3D12Impl* pShaderD3D12{NEW_RC_OBJ(m_ShaderObjAllocator, "ShaderD3D12Impl instance", ShaderD3D12Impl)(this, ShaderCI)};
                            pShaderD3D12->QueryInterface(IID_Shader, reinterpret_cast<IObject**>(ppShader));
 
                            OnCreateDeviceObject(pShaderD3D12);
@@ -544,7 +601,7 @@ void RenderDeviceD3D12Impl::CreateTextureFromD3DResource(ID3D12Resource* pd3d12T
     CreateDeviceObject("texture", TexDesc, ppTexture,
                        [&]() //
                        {
-                           TextureD3D12Impl* pTextureD3D12 = NEW_RC_OBJ(m_TexObjAllocator, "TextureD3D12Impl instance", TextureD3D12Impl)(m_TexViewObjAllocator, this, TexDesc, InitialState, pd3d12Texture);
+                           TextureD3D12Impl* pTextureD3D12{NEW_RC_OBJ(m_TexObjAllocator, "TextureD3D12Impl instance", TextureD3D12Impl)(m_TexViewObjAllocator, this, TexDesc, InitialState, pd3d12Texture)};
 
                            pTextureD3D12->QueryInterface(IID_Texture, reinterpret_cast<IObject**>(ppTexture));
                            pTextureD3D12->CreateDefaultViews();
@@ -557,7 +614,7 @@ void RenderDeviceD3D12Impl::CreateTexture(const TextureDesc& TexDesc, ID3D12Reso
     CreateDeviceObject("texture", TexDesc, ppTexture,
                        [&]() //
                        {
-                           TextureD3D12Impl* pTextureD3D12 = NEW_RC_OBJ(m_TexObjAllocator, "TextureD3D12Impl instance", TextureD3D12Impl)(m_TexViewObjAllocator, this, TexDesc, InitialState, pd3d12Texture);
+                           TextureD3D12Impl* pTextureD3D12{NEW_RC_OBJ(m_TexObjAllocator, "TextureD3D12Impl instance", TextureD3D12Impl)(m_TexViewObjAllocator, this, TexDesc, InitialState, pd3d12Texture)};
                            pTextureD3D12->QueryInterface(IID_TextureD3D12, reinterpret_cast<IObject**>(ppTexture));
                        });
 }
@@ -567,7 +624,7 @@ void RenderDeviceD3D12Impl::CreateTexture(const TextureDesc& TexDesc, const Text
     CreateDeviceObject("texture", TexDesc, ppTexture,
                        [&]() //
                        {
-                           TextureD3D12Impl* pTextureD3D12 = NEW_RC_OBJ(m_TexObjAllocator, "TextureD3D12Impl instance", TextureD3D12Impl)(m_TexViewObjAllocator, this, TexDesc, pData);
+                           TextureD3D12Impl* pTextureD3D12{NEW_RC_OBJ(m_TexObjAllocator, "TextureD3D12Impl instance", TextureD3D12Impl)(m_TexViewObjAllocator, this, TexDesc, pData)};
 
                            pTextureD3D12->QueryInterface(IID_Texture, reinterpret_cast<IObject**>(ppTexture));
                            pTextureD3D12->CreateDefaultViews();
@@ -583,7 +640,7 @@ void RenderDeviceD3D12Impl::CreateSampler(const SamplerDesc& SamplerDesc, ISampl
                            m_SamplersRegistry.Find(SamplerDesc, reinterpret_cast<IDeviceObject**>(ppSampler));
                            if (*ppSampler == nullptr)
                            {
-                               SamplerD3D12Impl* pSamplerD3D12(NEW_RC_OBJ(m_SamplerObjAllocator, "SamplerD3D12Impl instance", SamplerD3D12Impl)(this, SamplerDesc));
+                               SamplerD3D12Impl* pSamplerD3D12{NEW_RC_OBJ(m_SamplerObjAllocator, "SamplerD3D12Impl instance", SamplerD3D12Impl)(this, SamplerDesc)};
                                pSamplerD3D12->QueryInterface(IID_Sampler, reinterpret_cast<IObject**>(ppSampler));
                                OnCreateDeviceObject(pSamplerD3D12);
                                m_SamplersRegistry.Add(SamplerDesc, *ppSampler);
@@ -596,7 +653,7 @@ void RenderDeviceD3D12Impl::CreateFence(const FenceDesc& Desc, IFence** ppFence)
     CreateDeviceObject("Fence", Desc, ppFence,
                        [&]() //
                        {
-                           FenceD3D12Impl* pFenceD3D12(NEW_RC_OBJ(m_FenceAllocator, "FenceD3D12Impl instance", FenceD3D12Impl)(this, Desc));
+                           FenceD3D12Impl* pFenceD3D12{NEW_RC_OBJ(m_FenceAllocator, "FenceD3D12Impl instance", FenceD3D12Impl)(this, Desc)};
                            pFenceD3D12->QueryInterface(IID_Fence, reinterpret_cast<IObject**>(ppFence));
                            OnCreateDeviceObject(pFenceD3D12);
                        });
@@ -607,7 +664,7 @@ void RenderDeviceD3D12Impl::CreateQuery(const QueryDesc& Desc, IQuery** ppQuery)
     CreateDeviceObject("Query", Desc, ppQuery,
                        [&]() //
                        {
-                           QueryD3D12Impl* pQueryD3D12(NEW_RC_OBJ(m_QueryAllocator, "QueryD3D12Impl instance", QueryD3D12Impl)(this, Desc));
+                           QueryD3D12Impl* pQueryD3D12{NEW_RC_OBJ(m_QueryAllocator, "QueryD3D12Impl instance", QueryD3D12Impl)(this, Desc)};
                            pQueryD3D12->QueryInterface(IID_Query, reinterpret_cast<IObject**>(ppQuery));
                            OnCreateDeviceObject(pQueryD3D12);
                        });
@@ -618,7 +675,7 @@ void RenderDeviceD3D12Impl::CreateRenderPass(const RenderPassDesc& Desc, IRender
     CreateDeviceObject("RenderPass", Desc, ppRenderPass,
                        [&]() //
                        {
-                           RenderPassD3D12Impl* pRenderPassD3D12(NEW_RC_OBJ(m_RenderPassAllocator, "RenderPassD3D12Impl instance", RenderPassD3D12Impl)(this, Desc));
+                           RenderPassD3D12Impl* pRenderPassD3D12{NEW_RC_OBJ(m_RenderPassAllocator, "RenderPassD3D12Impl instance", RenderPassD3D12Impl)(this, Desc)};
                            pRenderPassD3D12->QueryInterface(IID_RenderPass, reinterpret_cast<IObject**>(ppRenderPass));
                            OnCreateDeviceObject(pRenderPassD3D12);
                        });
@@ -629,7 +686,7 @@ void RenderDeviceD3D12Impl::CreateFramebuffer(const FramebufferDesc& Desc, IFram
     CreateDeviceObject("Framebuffer", Desc, ppFramebuffer,
                        [&]() //
                        {
-                           FramebufferD3D12Impl* pFramebufferD3D12(NEW_RC_OBJ(m_FramebufferAllocator, "FramebufferD3D12Impl instance", FramebufferD3D12Impl)(this, Desc));
+                           FramebufferD3D12Impl* pFramebufferD3D12{NEW_RC_OBJ(m_FramebufferAllocator, "FramebufferD3D12Impl instance", FramebufferD3D12Impl)(this, Desc)};
                            pFramebufferD3D12->QueryInterface(IID_Framebuffer, reinterpret_cast<IObject**>(ppFramebuffer));
                            OnCreateDeviceObject(pFramebufferD3D12);
                        });
